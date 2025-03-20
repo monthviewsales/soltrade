@@ -1,3 +1,9 @@
+# Transaction Log
+transaction_log.log
+
+# Virtual Env for the project build
+env/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
