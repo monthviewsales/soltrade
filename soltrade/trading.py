@@ -174,7 +174,7 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
         input_amount = find_balance(config().secondary_mint)
         log_general.debug(f"Available Balance for Selling: {input_amount}")
 
-        if sell_condition1 or (sell_condition2 and sell_condition3):
+        if sell_condition1 or (sell_condition2 or sell_condition3):
             log_transaction.info("Soltrade has detected a sell signal.")
 
             try:
