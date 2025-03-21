@@ -78,13 +78,20 @@ def perform_analysis():
 
     # If in an open position, update the highest_price if the current price is higher
     if mkt.position:
-        # If highest_price is not yet set, initialize it at the entry price.
-        if not hasattr(mkt, 'highest_price') or mkt.highest_price == 0:
-            mkt.highest_price = price
-        elif price > mkt.highest_price:
-            mkt.highest_price = price
-            # Persist the new highest_price in position.json
-            mkt.update_position(True, stoploss, takeprofit, highest_price=mkt.highest_price)
+        # If entry_price is available use it, otherwise default to highest_price.
+        entry_price = getattr(mkt, 'entry_price', mkt.highest_price)
+        percent_change = ((price - entry_price) / entry_price) * 100
+        entry_info = f"Entry Price: {entry_price:6f} (Change: {percent_change:+.2f}%)"
+    else:
+        entry_info = "Entry Price: N/A"
+
+    # If highest_price is not yet set, initialize it at the entry price.
+    if not hasattr(mkt, 'highest_price') or mkt.highest_price == 0:
+        mkt.highest_price = price
+    elif price > mkt.highest_price:
+        mkt.highest_price = price
+        # Persist the new highest_price in position.json
+        mkt.update_position(True, stoploss, takeprofit, highest_price=mkt.highest_price)
 
         # Calculate trailing stop using a trailing stop percent from config (default 2%)
         trailing_stop_percent = getattr(config(), 'trailing_stop_percent', 0.02)
@@ -97,6 +104,12 @@ def perform_analysis():
     buy_condition1 = ema_short > ema_medium or price < lower_bb.iat[-1]
     buy_condition2 = rsi <= rsi_buy_threshold
 
+    # In degen mode, ignore the RSI condition for buying.
+    if trading_mode.lower() == "degen":
+        final_buy_decision = buy_condition1 or buy_condition2
+    else:
+        final_buy_decision = buy_condition1 and buy_condition2
+
     # Revised sell conditions:
     # Instead of forcing a sale when price >= takeprofit,
     # we now sell if the price falls below the stoploss or the trailing stop.
@@ -107,7 +120,7 @@ def perform_analysis():
     log_general.debug(f"""
 Trade Conditions:
 ---------------------------------
-Price: {price:6f}
+Price: {price:6f} / {entry_info}
 Short EMA: {ema_short}
 Medium EMA: {ema_medium}
 Upper BB: {upper_bb.iat[-1]}
@@ -123,7 +136,7 @@ Trading Mode: {trading_mode}
 Buy Conditions:
 - EMA Short > EMA Medium OR Price < Lower BB: {buy_condition1}
 - RSI <= {rsi_buy_threshold}: {buy_condition2}
-Final Buy Decision: {buy_condition1 and buy_condition2}
+Final Buy Decision: {final_buy_decision}
 
 Sell Conditions:
 - Price <= Stoploss OR Price < Trailing Stop: {sell_condition1}
@@ -136,7 +149,7 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
         input_amount = find_balance(config().primary_mint)
         log_general.debug(f"Available Balance for Buying: {input_amount}")
 
-        if buy_condition1 and buy_condition2:
+        if final_buy_decision:
             log_transaction.info("Soltrade has detected a buy signal.")
 
             if input_amount <= 0:
@@ -152,6 +165,7 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
                     stoploss = mkt.sl = cl.iat[-1] * stoploss_multiplier
                     takeprofit = mkt.tp = cl.iat[-1] * takeprofit_multiplier
                     mkt.highest_price = cl.iat[-1]
+                    mkt.entry_price = cl.iat[-1]  # Record the entry price
                     mkt.update_position(True, stoploss, takeprofit, highest_price=mkt.highest_price)
             except Exception as e:
                 log_transaction.error(f"Buy trade execution failed: {e}")
