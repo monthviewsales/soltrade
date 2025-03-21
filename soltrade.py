@@ -13,7 +13,7 @@ def check_json_state() -> bool:
     return False
 
 # Prints "Soltrade" and information about the connected wallet
-print("""                    $$\   $$\                              $$\           
+print(r"""                    $$\   $$\                              $$\           
                     $$ |  $$ |                             $$ |          
  $$$$$$$\  $$$$$$\  $$ |$$$$$$\    $$$$$$\  $$$$$$\   $$$$$$$ | $$$$$$\  
 $$  _____|$$  __$$\ $$ |\_$$  _|  $$  __$$\ \____$$\ $$  __$$ |$$  __$$\ 
