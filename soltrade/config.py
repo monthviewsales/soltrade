@@ -38,13 +38,21 @@ class Config:
         self.price_update_seconds = int(os.getenv("PRICE_UPDATE_SECONDS") or 60)
         self.trading_interval_minutes = int(os.getenv("TRADING_INTERVALS_MINUTE") or 1)
         self.slippage = int(os.getenv("SLIPPAGE") or 50)
+        # Retail Mode
         self.stoploss_percent = float(os.getenv('STOPLOSS_PERCENT', 0.925))
         self.takeprofit_percent = float(os.getenv('TAKEPROFIT_PERCENT', 1.25))
         self.rsi_buy_threshold = float(os.getenv('RSI_BUY_THRESHOLD', 30))
         self.rsi_sell_threshold = float(os.getenv('RSI_SELL_THRESHOLD', 70))
+        # Degen Mode
+        self.degen_rsi_buy_threshold = float(os.getenv("DEGEN_RSI_BUY_THRESHOLD", 40))
+        self.degen_rsi_sell_threshold = float(os.getenv("DEGEN_RSI_SELL_THRESHOLD", 60))
+        self.degen_stoploss_percent = float(os.getenv("DEGEN_STOPLOSS_PERCENT", 0.95))
+        self.degen_takeprofit_percent = float(os.getenv("DEGEN_TAKEPROFIT_PERCENT", 1.05))
 
         # DEFAULT FEE OF ROUGHLY $0.04 TODAY
         self.computeUnitPriceMicroLamports = int(os.getenv("COMPUTE_UNIT_PRICE_MICRO_LAMPORTS") or 20 * 14000)
+        # Trading Mode Config
+        self.trading_mode = os.getenv("TRADING_MODE", "retail")
 
     @property
     def keypair(self) -> Keypair:

@@ -57,19 +57,26 @@ def perform_analysis():
     rsi = calculate_rsi(dataframe=df, length=14)
     upper_bb, lower_bb = calculate_bbands(dataframe=df, length=14)
     
-    # Retrieve stoploss and takeprofit multipliers from config
-    stoploss_multiplier = config().stoploss_percent
-    takeprofit_multiplier = config().takeprofit_percent
-    
+    # Retrieve the trading mode from config
+    trading_mode = config().trading_mode
+
+    # Determine thresholds based on trading mode
+    if trading_mode.lower() == "degen":
+        rsi_buy_threshold = config().degen_rsi_buy_threshold
+        rsi_sell_threshold = config().degen_rsi_sell_threshold
+        stoploss_multiplier = config().degen_stoploss_percent
+        takeprofit_multiplier = config().degen_takeprofit_percent
+    else:
+        rsi_buy_threshold = config().rsi_buy_threshold
+        rsi_sell_threshold = config().rsi_sell_threshold
+        stoploss_multiplier = config().stoploss_percent
+        takeprofit_multiplier = config().takeprofit_percent
+
     # Update current stoploss and takeprofit from market instance
     stoploss = mkt.sl
     takeprofit = mkt.tp
 
-    # Get RSI thresholds from config (.env file)
-    rsi_buy_threshold = config().rsi_buy_threshold
-    rsi_sell_threshold = config().rsi_sell_threshold
-
-    # Trade conditions using configurable RSI thresholds
+    # Trade conditions using configurable thresholds
     buy_condition1 = ema_short > ema_medium or price < lower_bb.iat[-1]
     buy_condition2 = rsi <= rsi_buy_threshold
     sell_condition1 = price <= stoploss or price >= takeprofit
@@ -79,7 +86,7 @@ def perform_analysis():
     log_general.debug(f"""
 Trade Conditions:
 ---------------------------------
-Price: {price}
+Price: {price:6f}
 Short EMA: {ema_short}
 Medium EMA: {ema_medium}
 Upper BB: {upper_bb.iat[-1]}
@@ -88,6 +95,7 @@ RSI: {rsi}
 Stop Loss: {stoploss}
 Take Profit: {takeprofit}
 Market Position: {mkt.position}
+Trading Mode: {trading_mode}
 ---------------------------------
 Buy Conditions:
 - EMA Short > EMA Medium OR Price < Lower BB: {buy_condition1}
@@ -101,13 +109,13 @@ Sell Conditions:
 Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
 """)
 
-    # Trade execution logic
     if not mkt.position:
         input_amount = find_balance(config().primary_mint)
         log_general.debug(f"Available Balance for Buying: {input_amount}")
 
         if buy_condition1 and buy_condition2:
             log_transaction.info("Soltrade has detected a buy signal.")
+
             if input_amount <= 0:
                 log_transaction.warning(f"Buy signal detected, but not enough {config().primary_mint_symbol} to trade.")
                 return
@@ -117,7 +125,6 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
                 log_transaction.info(f"Buy Trade Execution Status: {is_swapped}")
 
                 if is_swapped:
-                    # Use multipliers from the .env config to calculate stoploss and takeprofit
                     stoploss = mkt.sl = cl.iat[-1] * stoploss_multiplier
                     takeprofit = mkt.tp = cl.iat[-1] * takeprofit_multiplier
                     mkt.update_position(True, stoploss, takeprofit)
@@ -130,6 +137,7 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
 
         if sell_condition1 or (sell_condition2 and sell_condition3):
             log_transaction.info("Soltrade has detected a sell signal.")
+
             try:
                 is_swapped = asyncio.run(perform_swap(input_amount, config().secondary_mint))
                 log_transaction.info(f"Sell Trade Execution Status: {is_swapped}")
@@ -140,7 +148,7 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
             except Exception as e:
                 log_transaction.error(f"Sell trade execution failed: {e}")
             return
-
+        
 # This starts the trading function on a timer
 def start_trading():
     log_general.info("Soltrade has now initialized the trading algorithm.")
