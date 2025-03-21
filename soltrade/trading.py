@@ -76,10 +76,31 @@ def perform_analysis():
     stoploss = mkt.sl
     takeprofit = mkt.tp
 
+    # If in an open position, update the highest_price if the current price is higher
+    if mkt.position:
+        # If highest_price is not yet set, initialize it at the entry price.
+        if not hasattr(mkt, 'highest_price') or mkt.highest_price == 0:
+            mkt.highest_price = price
+        elif price > mkt.highest_price:
+            mkt.highest_price = price
+            # Persist the new highest_price in position.json
+            mkt.update_position(True, stoploss, takeprofit, highest_price=mkt.highest_price)
+
+        # Calculate trailing stop using a trailing stop percent from config (default 2%)
+        trailing_stop_percent = getattr(config(), 'trailing_stop_percent', 0.02)
+        trailing_stop = mkt.highest_price * (1 - trailing_stop_percent)
+    else:
+        # When not in a position, highest_price is irrelevant.
+        trailing_stop = 0
+
     # Trade conditions using configurable thresholds
     buy_condition1 = ema_short > ema_medium or price < lower_bb.iat[-1]
     buy_condition2 = rsi <= rsi_buy_threshold
-    sell_condition1 = price <= stoploss or price >= takeprofit
+
+    # Revised sell conditions:
+    # Instead of forcing a sale when price >= takeprofit,
+    # we now sell if the price falls below the stoploss or the trailing stop.
+    sell_condition1 = price <= stoploss or (mkt.position and price < trailing_stop)
     sell_condition2 = ema_short < ema_medium or price > upper_bb.iat[-1]
     sell_condition3 = rsi >= rsi_sell_threshold
 
@@ -94,6 +115,8 @@ Lower BB: {lower_bb.iat[-1]}
 RSI: {rsi}
 Stop Loss: {stoploss}
 Take Profit: {takeprofit}
+Highest Price: {mkt.highest_price if mkt.position else 'N/A'}
+Trailing Stop: {trailing_stop if mkt.position else 'N/A'}
 Market Position: {mkt.position}
 Trading Mode: {trading_mode}
 ---------------------------------
@@ -103,7 +126,7 @@ Buy Conditions:
 Final Buy Decision: {buy_condition1 and buy_condition2}
 
 Sell Conditions:
-- Price <= Stoploss OR Price >= Takeprofit: {sell_condition1}
+- Price <= Stoploss OR Price < Trailing Stop: {sell_condition1}
 - EMA Short < EMA Medium OR Price > Upper BB: {sell_condition2}
 - RSI >= {rsi_sell_threshold}: {sell_condition3}
 Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
@@ -125,9 +148,11 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
                 log_transaction.info(f"Buy Trade Execution Status: {is_swapped}")
 
                 if is_swapped:
+                    # Upon buying, set stoploss, takeprofit, and initialize highest_price to the entry price.
                     stoploss = mkt.sl = cl.iat[-1] * stoploss_multiplier
                     takeprofit = mkt.tp = cl.iat[-1] * takeprofit_multiplier
-                    mkt.update_position(True, stoploss, takeprofit)
+                    mkt.highest_price = cl.iat[-1]
+                    mkt.update_position(True, stoploss, takeprofit, highest_price=mkt.highest_price)
             except Exception as e:
                 log_transaction.error(f"Buy trade execution failed: {e}")
             return
@@ -143,8 +168,10 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
                 log_transaction.info(f"Sell Trade Execution Status: {is_swapped}")
 
                 if is_swapped:
+                    # Reset values upon exiting the position.
                     stoploss = takeprofit = mkt.sl = mkt.tp = 0
-                    mkt.update_position(False, stoploss, takeprofit)
+                    mkt.highest_price = 0
+                    mkt.update_position(False, stoploss, takeprofit, highest_price=mkt.highest_price)
             except Exception as e:
                 log_transaction.error(f"Sell trade execution failed: {e}")
             return

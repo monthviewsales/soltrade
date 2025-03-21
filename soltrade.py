@@ -3,7 +3,6 @@ from soltrade.config import config
 from soltrade.trading import start_trading
 from soltrade.log import log_general
 
-
 # Initialize configuration
 config()
 
