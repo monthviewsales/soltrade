@@ -20,27 +20,37 @@ class MarketPosition:
         self.is_open = False
         self.sl = 0
         self.tp = 0
+        self.highest_price = 0  # New attribute for trailing stop
+        self.entry_price = 0
         self.load_position()
-        self.update_position(self.is_open, self.sl, self.tp)
+        self.update_position(self.is_open, self.sl, self.tp, highest_price=self.highest_price)
 
     def load_position(self):
         if os.path.exists(self.path):
             with open(self.path, 'r') as file:
                 position_data = json.load(file)
-                self.is_open = position_data["is_open"]
-                self.sl = position_data["sl"]
-                self.tp = position_data["tp"]
+                self.is_open = position_data.get("is_open", False)
+                self.sl = position_data.get("sl", 0)
+                self.tp = position_data.get("tp", 0)
+                self.highest_price = position_data.get("highest_price", 0)
+                self.entry_price = position_data.get("entry_price", 0)
         else:
-            self.update_position(self.is_open, self.sl, self.tp)
+            self.update_position(self.is_open, self.sl, self.tp, highest_price=self.highest_price,entry_price=self.entry_price)
             
-    def update_position(self, position, stoploss, takeprofit):
+    def update_position(self, position, stoploss, takeprofit, highest_price=None,entry_price=None):
         self.sl = stoploss
         self.tp = takeprofit
         self.is_open = position
+        if highest_price is not None:
+            self.highest_price = highest_price
+        if entry_price is not None:
+            self.entry_price = entry_price
         position_obj = {
             "is_open": position,
             "sl": stoploss,
-            "tp": takeprofit
+            "tp": takeprofit,
+            "highest_price": self.highest_price,
+            "entry_price": self.entry_price
         }
         with open(self.path, 'w') as file:
             json.dump(position_obj, file)
