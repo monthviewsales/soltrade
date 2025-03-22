@@ -1,5 +1,9 @@
-# Transaction Log
-transaction_log.log
+#MacOS
+.DS_Store
+
+# soltradebot Logs
+*.log
+*.log.*
 
 # Virtual Env for the project build
 env/

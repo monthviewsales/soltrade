@@ -57,6 +57,10 @@ def perform_analysis():
     rsi = calculate_rsi(dataframe=df, length=14)
     upper_bb, lower_bb = calculate_bbands(dataframe=df, length=14)
     
+    # Determine trend bias by comparing the current medium EMA to its previous value
+    prev_ema_medium = df['close'].ewm(span=20, adjust=False).mean().iat[-2]
+    trend_bias = ema_medium > prev_ema_medium
+
     # Retrieve the trading mode from config
     trading_mode = config().trading_mode
 
@@ -93,20 +97,39 @@ def perform_analysis():
         # Persist the new highest_price in position.json
         mkt.update_position(True, stoploss, takeprofit, highest_price=mkt.highest_price)
 
-        # Calculate trailing stop using a trailing stop percent from config (default 2%)
-        trailing_stop_percent = getattr(config(), 'trailing_stop_percent', 0.02)
+        # Calculate trailing stop using a trailing stop percent from config (default 5%)
+        trailing_stop_percent = getattr(config(), 'trailing_stop_percent', 0.05)
         trailing_stop = mkt.highest_price * (1 - trailing_stop_percent)
     else:
         # When not in a position, highest_price is irrelevant.
         trailing_stop = 0
 
     # Trade conditions using configurable thresholds
-    buy_condition1 = ema_short > ema_medium or price < lower_bb.iat[-1]
+    buy_condition1 = ema_short > ema_medium and price < lower_bb.iat[-1]
     buy_condition2 = rsi <= rsi_buy_threshold
 
-    # In degen mode, ignore the RSI condition for buying.
+    # ------------------------------
+    # Trade Logic Overview
+    # ------------------------------
+    # Buy Logic:
+    # - Degen Mode:
+    #     * Requires all of the following:
+    #         - Medium EMA trending upward
+    #         - Price below lower Bollinger Band
+    #         - RSI at or below configured threshold
+    # - Retail Mode:
+    #     * Requires EMA crossover and RSI threshold met
+    #
+    # Sell Logic:
+    # - Exit if price hits stop loss or trailing stop
+    # - Exit if overbought conditions are met (BB, EMA, or RSI)
+    # ------------------------------
+
+    # In degen mode, only buy if we're in an uptrend,
+    # the price is under the lower Bollinger Band,
+    # and RSI is below the dynamic threshold from config
     if trading_mode.lower() == "degen":
-        final_buy_decision = buy_condition1 or buy_condition2
+        final_buy_decision = trend_bias and price < lower_bb.iat[-1] and rsi <= rsi_buy_threshold
     else:
         final_buy_decision = buy_condition1 and buy_condition2
 
@@ -114,7 +137,7 @@ def perform_analysis():
     # Instead of forcing a sale when price >= takeprofit,
     # we now sell if the price falls below the stoploss or the trailing stop.
     sell_condition1 = price <= stoploss or (mkt.position and price < trailing_stop)
-    sell_condition2 = ema_short < ema_medium or price > upper_bb.iat[-1]
+    sell_condition2 = ema_short < ema_medium and price > upper_bb.iat[-1]
     sell_condition3 = rsi >= rsi_sell_threshold
 
     log_general.debug(f"""
@@ -136,12 +159,17 @@ Trading Mode: {trading_mode}
 Buy Conditions:
 - EMA Short > EMA Medium OR Price < Lower BB: {buy_condition1}
 - RSI <= {rsi_buy_threshold}: {buy_condition2}
+Buy Decision Reason: {'Trend Up + BB Dip + RSI' if final_buy_decision and trading_mode.lower() == 'degen' else 'EMA Crossover + RSI' if final_buy_decision else 'No qualifying conditions met'}
 Final Buy Decision: {final_buy_decision}
+""")
 
+    if mkt.position:
+        log_general.debug(f"""
 Sell Conditions:
 - Price <= Stoploss OR Price < Trailing Stop: {sell_condition1}
 - EMA Short < EMA Medium OR Price > Upper BB: {sell_condition2}
 - RSI >= {rsi_sell_threshold}: {sell_condition3}
+Sell Decision Reason: {'Stoploss/Trailing hit' if sell_condition1 else 'Overbought/Trend Reversal' if sell_condition2 and sell_condition3 else 'No qualifying conditions met'}
 Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
 """)
 
