@@ -63,6 +63,8 @@ def perform_analysis():
 
     # Retrieve the trading mode from config
     trading_mode = config().trading_mode
+    # Set buy logic mode based on trading mode
+    buy_logic_mode = 'loose' if trading_mode.lower() == 'degen' else 'strict'
 
     # Determine thresholds based on trading mode
     if trading_mode.lower() == "degen":
@@ -75,6 +77,14 @@ def perform_analysis():
         rsi_sell_threshold = config().rsi_sell_threshold
         stoploss_multiplier = config().stoploss_percent
         takeprofit_multiplier = config().takeprofit_percent
+
+    # Add margin variables for more flexible buy/sell triggers
+    buy_margin = getattr(config(), 'buy_margin_percent', 0)
+    sell_margin = getattr(config(), 'sell_margin_percent', 0)
+
+    # Precompute margin-adjusted targets so they're always available
+    bb_target = lower_bb.iat[-1] * (1 + buy_margin)
+    rsi_target = rsi_buy_threshold * (1 + buy_margin)
 
     # Update current stoploss and takeprofit from market instance
     stoploss = mkt.sl
@@ -105,40 +115,40 @@ def perform_analysis():
         trailing_stop = 0
 
     # Trade conditions using configurable thresholds
-    buy_condition1 = ema_short > ema_medium and price < lower_bb.iat[-1]
-    buy_condition2 = rsi <= rsi_buy_threshold
+    ema_target = ema_medium * (1 - buy_margin)
+    ema_crossover = ema_short >= ema_target
+    buy_condition1 = ema_crossover or price <= bb_target
 
     # ------------------------------
-    # Trade Logic Overview
+    # Margin logic:
+    # BUY_MARGIN_PERCENT allows buy triggers to activate slightly before crossing exact thresholds (BB, RSI).
+    # SELL_MARGIN_PERCENT allows sell triggers like RSI to hit slightly early.
+    # These are configurable in the .env file and default to 0 if not set.
     # ------------------------------
-    # Buy Logic:
-    # - Degen Mode:
-    #     * Requires all of the following:
-    #         - Medium EMA trending upward
-    #         - Price below lower Bollinger Band
-    #         - RSI at or below configured threshold
-    # - Retail Mode:
-    #     * Requires EMA crossover and RSI threshold met
-    #
-    # Sell Logic:
-    # - Exit if price hits stop loss or trailing stop
-    # - Exit if overbought conditions are met (BB, EMA, or RSI)
-    # ------------------------------
-
+    
     # In degen mode, only buy if we're in an uptrend,
     # the price is under the lower Bollinger Band,
     # and RSI is below the dynamic threshold from config
     if trading_mode.lower() == "degen":
-        final_buy_decision = trend_bias and price < lower_bb.iat[-1] and rsi <= rsi_buy_threshold
+        # Logic mode handling for buy decision
+        if buy_logic_mode == "loose":
+            # Loose mode: Buy if trend is up and either BB dip OR RSI dip
+            final_buy_decision = trend_bias and (price <= bb_target or rsi <= rsi_target)
+        else:
+            # Strict mode: Buy only if all conditions are met
+            final_buy_decision = trend_bias and price <= bb_target and rsi <= rsi_target
     else:
-        final_buy_decision = buy_condition1 and buy_condition2
+        final_buy_decision = buy_condition1 and (rsi <= rsi_buy_threshold)
 
     # Revised sell conditions:
     # Instead of forcing a sale when price >= takeprofit,
     # we now sell if the price falls below the stoploss or the trailing stop.
+    ema_sell_target = ema_medium * (1 + sell_margin)
+    ema_reversal = ema_short <= ema_sell_target
     sell_condition1 = price <= stoploss or (mkt.position and price < trailing_stop)
-    sell_condition2 = ema_short < ema_medium and price > upper_bb.iat[-1]
-    sell_condition3 = rsi >= rsi_sell_threshold
+    sell_condition2 = ema_reversal or price > upper_bb.iat[-1]
+    rsi_sell_target = rsi_sell_threshold * (1 - sell_margin)
+    sell_condition3 = rsi >= rsi_sell_target
 
     log_general.debug(f"""
 Trade Conditions:
@@ -157,9 +167,9 @@ Market Position: {mkt.position}
 Trading Mode: {trading_mode}
 ---------------------------------
 Buy Conditions:
-- EMA Short > EMA Medium OR Price < Lower BB: {buy_condition1}
-- RSI <= {rsi_buy_threshold}: {buy_condition2}
-Buy Decision Reason: {'Trend Up + BB Dip + RSI' if final_buy_decision and trading_mode.lower() == 'degen' else 'EMA Crossover + RSI' if final_buy_decision else 'No qualifying conditions met'}
+- EMA Short >= EMA Medium (with margin) OR Price < Lower BB: {buy_condition1}
+- RSI <= {rsi_buy_threshold}: {rsi <= rsi_buy_threshold}
+Buy Decision Reason: {'Trend + (BB or RSI)' if final_buy_decision and buy_logic_mode == 'loose' else 'Trend + BB + RSI' if final_buy_decision else 'No qualifying conditions met'}
 Final Buy Decision: {final_buy_decision}
 """)
 
@@ -167,8 +177,8 @@ Final Buy Decision: {final_buy_decision}
         log_general.debug(f"""
 Sell Conditions:
 - Price <= Stoploss OR Price < Trailing Stop: {sell_condition1}
-- EMA Short < EMA Medium OR Price > Upper BB: {sell_condition2}
-- RSI >= {rsi_sell_threshold}: {sell_condition3}
+- EMA Short <= EMA Medium (with margin) OR Price > Upper BB: {sell_condition2}
+- RSI >= {rsi_sell_target}: {sell_condition3}
 Sell Decision Reason: {'Stoploss/Trailing hit' if sell_condition1 else 'Overbought/Trend Reversal' if sell_condition2 and sell_condition3 else 'No qualifying conditions met'}
 Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
 """)
@@ -202,7 +212,7 @@ Final Sell Decision: {sell_condition1 or (sell_condition2 and sell_condition3)}
         input_amount = find_balance(config().secondary_mint)
         log_general.debug(f"Available Balance for Selling: {input_amount}")
 
-        if sell_condition1 or (sell_condition2 or sell_condition3):
+        if sell_condition1 or (sell_condition2 and sell_condition3):
             log_transaction.info("Soltrade has detected a sell signal.")
 
             try:
