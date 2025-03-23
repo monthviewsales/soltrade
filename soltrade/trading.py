@@ -90,6 +90,19 @@ def perform_analysis():
     stoploss = mkt.sl
     takeprofit = mkt.tp
 
+    # Recalculate the expected stoploss and takeprofit based on current config values
+    if mkt.position and hasattr(mkt, 'entry_price') and mkt.entry_price > 0:
+        expected_stoploss = mkt.entry_price * stoploss_multiplier
+        expected_takeprofit = mkt.entry_price * takeprofit_multiplier
+
+        if abs(mkt.sl - expected_stoploss) > 0.000001 or abs(mkt.tp - expected_takeprofit) > 0.000001:
+            log_general.info(f"Updated stoploss or takeprofit from .env: SL {mkt.sl:.6f} → {expected_stoploss:.6f}, TP {mkt.tp:.6f} → {expected_takeprofit:.6f}")
+            mkt.sl = expected_stoploss
+            mkt.tp = expected_takeprofit
+            stoploss = expected_stoploss
+            takeprofit = expected_takeprofit
+            mkt.update_position(True, stoploss, takeprofit, highest_price=mkt.highest_price)
+
     # If in an open position, update the highest_price if the current price is higher
     if mkt.position:
         # If entry_price is available use it, otherwise default to highest_price.
